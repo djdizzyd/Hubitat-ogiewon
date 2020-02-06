@@ -36,11 +36,14 @@
  *    2019-07-15  Dan Ogorchock  Added setLevel and setVolume commands for greater compatability with Hubitat Dashboard and other Apps
  *    2019-07-23  Dan Ogorchock  Added Actuator Capability to allow RM Custom Actions to select this device
  *    2019-12-31  Dan Ogorchock  Changed volume control logic to be more robust and clear to users
- *
+ *    2020-01-14  Dan Ogorchock  Added Switch Capability and Default Activity user preference.  If the Parent switch is turned on, 
+ *                               the default activity is turned on.  If the Parent switch is turned off, the current Activity is turned off.
+ *    2020-01-21  Dan Ogorchock  Fixed bug in the Parent Switch's Status not updating when controlled via the physical remote control
+ *    2020-01-28  Dan Ogorchock  Exposed "deviceCommand" as a custom command per idea from @Geoff_T
  *
  */
 
-def version() {"v0.1.20191231"}
+def version() {"v0.1.20200128"}
 
 import hubitat.helper.InterfaceUtils
 
@@ -51,12 +54,14 @@ metadata {
         capability "Switch Level"
         capability "Audio Volume"
         capability "Actuator"
+        capability "Switch"
 
         //command "sendMsg", ["String"]
         //command "getConfig"
         //command "startActivity", ["String"]
         //command "stopActivity"
         command "getCurrentActivity"
+        command "deviceCommand", ["String", "Number"]
         
         command "channelUp"
         command "channelDown"
@@ -69,18 +74,18 @@ metadata {
 preferences {
     input("ip", "text", title: "Harmony Hub", description: "IP Address (in form of 192.168.1.45)", required: true)
     input name: "VolumeRepeat", type: "number", title: "Volume Control", description: "Increase/Decrease by this number of 'presses'",required: true, defaultValue: "1", range: "1..100"
-    input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
-    
+    input("deviceName", "enum", title: "Default Activity:", description: "used for parent device's switch capability", multiple: false, required: false, options: getActivities())
+    input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true   
 }
 
 
 def parse(String description) {
-    //log.debug "parsed $description"
-	//state.description = []
+    //log.debug "parsed: $description"
+    //state.description = []
     def json = null;
     try{
         json = new groovy.json.JsonSlurper().parseText(description)
-        //log.debug "${json}"    
+        //log.debug "${json}"
         if(json == null){
             log.warn "String description not parsed"
             return
@@ -101,7 +106,7 @@ def parse(String description) {
                 def tempID = (it.id == "-1") ? "PowerOff" : "${it.id}"                    
                 if (logEnable) log.debug "Activity Label: ${it.label}, ID: ${tempID}"
                 
-                //store portion of config results in state veraible (needed for volume/channel control) 
+                //store portion of config results in state variable (needed for volume/channel control) 
                 def volume = "null"
                 if (it.roles?.VolumeActivityRole) volume = it.roles?.VolumeActivityRole
                 def channel = "null"
@@ -111,12 +116,20 @@ def parse(String description) {
                 //Create a Child Switch Device for each Activity if needed, default all of them to 'off' for now
                 updateChild(tempID, "unknown", it.label)
             }
-
+           
             //if (logEnable) { 
             //    def temp = new groovy.json.JsonBuilder(state.HarmonyConfig).toString()
             //    log.debug state.HarmonyConfig
             //    log.debug temp
             //}
+
+            
+            //2020-01-28 DGO - Add new State Variable to display list of Device ID's on Device Details web page.
+            state.HarmonyDevices =[]
+            json?.data?.device?.each { it ->                    
+                if (logEnable) log.debug "Device Label: ${it.label}, ID: ${it.id}"
+                state.HarmonyDevices << ["id":"${it.id}", "label":"${it.label}"]
+            }
 
         } else {
             log.error "Received msg = '${json?.msg}' and code = '${json?.code}' from Harmony Hub"
@@ -172,6 +185,14 @@ def parse(String description) {
 
 
 def updateChildren(String ActivityID) {
+    //Make sure the parent's "Switch" status is correct
+    if (ActivityID != "-1") {
+        sendEvent(name: "switch", value: "on")
+    }
+    else {
+        sendEvent(name: "switch", value: "off")
+    }	
+	
     //Switch Child Device States based on the return value.  If "-1" turn off all child activity devices
     def tempID = (ActivityID == "-1") ? "PowerOff" : ActivityID
     try {
@@ -295,9 +316,28 @@ def getConfig() {
     sendMsg('{"hubId":"' + state.remoteId + '","timeout":60,"hbus":{"cmd":"vnd.logitech.harmony/vnd.logitech.harmony.engine?config","id":"0","params":{"verb":"get"}}}')
 }
 
+def on() {
+    if (deviceName) {
+        if (logEnable) log.debug "Default Activity = ${deviceName}"
+        startActivity(deviceName)
+    }
+    else {
+        log.info "Default Activity not selected yet"
+    }
+}
+
+def off() {
+        stopActivity()
+}
+
 def startActivity(String activityID) {
     if(!state.remoteId) return
-    
+    if (activityID != "-1") {
+        sendEvent(name: "switch", value: "on")
+    }
+    else {
+        sendEvent(name: "switch", value: "off")
+    }
     sendMsg('{"hubId":"' + state.remoteId + '","timeout":30,"hbus":{"cmd":"harmony.activityengine?runactivity","id":"0","params":{"async": "true","timestamp": 0,"args": {"rule": "start"},"activityId": "' + activityID + '"}}}')
 }
 
@@ -502,6 +542,30 @@ def updateChild(String activityId, String value, String activityName = null) {
             log.error("Child parse call failed: ${e}")
         }
     }
+}
+
+def getActivities() {
+    def result = [:]
+    def activity
+    def name
+    
+    try {
+        childDevices.each{ it ->
+            activity = it.deviceNetworkId.minus("${device.deviceNetworkId}-")
+            name = it.name
+            //log.debug "child: ${activity}:${name}"
+            if (name != "PowerOff") {
+                result << ["${activity}":"${name}"]
+            }
+        }
+        //result = ["${activity}":"${name}"]
+        //log.debug result
+        return result;
+    } 
+    catch(e) {
+        //log.error "Failed to find child without exception: ${e}";
+        //return null;
+    }   
 }
 
 private def getChild(String activityId)
