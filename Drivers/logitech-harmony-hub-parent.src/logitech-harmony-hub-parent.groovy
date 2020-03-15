@@ -40,10 +40,11 @@
  *                               the default activity is turned on.  If the Parent switch is turned off, the current Activity is turned off.
  *    2020-01-21  Dan Ogorchock  Fixed bug in the Parent Switch's Status not updating when controlled via the physical remote control
  *    2020-01-28  Dan Ogorchock  Exposed "deviceCommand" as a custom command per idea from @Geoff_T
+ *    2020-03-01  Rebecca Ellenby Added Left, Right, Up, Down, and Ok custom commands.  
  *
  */
 
-def version() {"v0.1.20200128"}
+def version() {"v0.1.20200301"}
 
 import hubitat.helper.InterfaceUtils
 
@@ -61,11 +62,17 @@ metadata {
         //command "startActivity", ["String"]
         //command "stopActivity"
         command "getCurrentActivity"
-        command "deviceCommand", ["String", "Number"]
-        
+        command "deviceCommand", [[name:"Command", type: "STRING", description: "Harmony Hub Command", constraints: ["STRING"]], [name:"DeviceID", type: "STRING", description: "Harmony Hub Device ID", constraints: ["STRING"]]]
         command "channelUp"
         command "channelDown"
         command "channelPrev"
+
+        // Labeled Actuator
+        command "leftPress", [[name:"DeviceID", type: "STRING", description: "Harmony Hub Device ID", constraints: ["STRING"]]]
+        command "rightPress", [[name:"DeviceID", type: "STRING", description: "Harmony Hub Device ID", constraints: ["STRING"]]]
+        command "upPress", [[name:"DeviceID", type: "STRING", description: "Harmony Hub Device ID", constraints: ["STRING"]]]
+        command "downPress", [[name:"DeviceID", type: "STRING", description: "Harmony Hub Device ID", constraints: ["STRING"]]]
+        command "okPress", [[name:"DeviceID", type: "STRING", description: "Harmony Hub Device ID", constraints: ["STRING"]]]
         
         attribute "Activity","String"
     }
@@ -358,7 +365,7 @@ def sendMsg(String s) {
 }
 
 def deviceCommand(command, deviceID) {
-    sendMsg('{"hubId":"' + state.remoteId + '","timeout":30,"hbus":{"cmd":"vnd.logitech.harmony/vnd.logitech.harmony.engine?holdAction","id": "0", "params":{"status": "press","timestamp": "0","verb": "render", "action": "{\\"command\\": \\"' + command + '\\", \\"type\\":\\"IRCommand\\", \\"deviceId\\": \\"' + deviceID + '\\"}"}}}')
+    sendMsg('{"hubId":"' + state.remoteId + '","timeout":30,"hbus":{"cmd":"vnd.logitech.harmony/vnd.logitech.harmony.engine?holdAction","id": "0", "params":{"status": "pressrelease","timestamp": "0","verb": "render", "action": "{\\"command\\": \\"' + command + '\\", \\"type\\":\\"IRCommand\\", \\"deviceId\\": \\"' + deviceID + '\\"}"}}}')
 }
 
 def mute() {
@@ -455,6 +462,32 @@ def channelPrev() {
             }
         }
     }
+}
+
+// Sends a custom command to a chosen device, not reliant on whether it is the default volume/channel changing device
+
+def customCommand(String command, String device) {
+    deviceCommand(command, device)
+}
+
+def leftPress(String device) {
+    deviceCommand("DirectionLeft", device)
+}
+
+def rightPress(String device) {
+    deviceCommand("DirectionRight", device)
+}
+
+def upPress(String device) {
+    deviceCommand("DirectionUp", device)
+}
+
+def downPress(String device) {
+    deviceCommand("DirectionDown", device)
+}
+
+def okPress(String device) {
+    deviceCommand("OK", device)
 }
 
 //sendData() is called from the Child Devices to start/stop activities
